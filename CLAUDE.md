@@ -1,0 +1,107 @@
+# CLAUDE.md
+
+> **This is experimental software. Commands execute real financial transactions. Test with `kraken paper` before real funds. See `DISCLAIMER.md`.**
+
+Integration guidance for Claude Code, Claude Desktop, and other Anthropic-powered agents interacting with `kraken-cli`.
+
+Fast entry points:
+- Runtime context: `CONTEXT.md`
+- Full command contract: `agents/tool-catalog.json`
+
+## What is kraken-cli?
+
+A command-line interface for the Kraken cryptocurrency exchange. Every command returns structured JSON. Designed for AI agents and automated pipelines.
+
+## Invocation
+
+Call `kraken` as a subprocess. Always use `-o json` and redirect stderr:
+
+```bash
+kraken <command> [args...] -o json 2>/dev/null
+```
+
+## Authentication
+
+Set environment variables before invoking:
+
+```bash
+export KRAKEN_API_KEY="your-key"
+export KRAKEN_API_SECRET="your-secret"
+```
+
+Public market data commands (ticker, orderbook, ohlc, trades, spreads, status) require no credentials.
+
+## Key Conventions
+
+- stdout is always valid JSON on success, or a JSON error envelope on failure.
+- The `error` field in error envelopes is a stable category code: `api`, `auth`, `network`, `rate_limit`, `validation`, `config`, `websocket`, `io`, `parse`.
+- WebSocket commands emit NDJSON (one JSON object per line).
+- Paper trading commands (`kraken paper ...`) use live prices but no real money. No auth needed.
+- Exit code 0 = success, non-zero = failure.
+
+## Safety Rules
+
+1. Never execute any command marked `dangerous` without explicit user confirmation. The `dangerous` field in `agents/tool-catalog.json` is the authoritative list (32 commands).
+2. Use `--validate` flag to dry-run order commands before submitting.
+3. Use `kraken paper` commands for testing strategies safely.
+4. Gate all order placement, cancellation, withdrawal, transfer, and staking operations behind user approval.
+5. Never log or display API secrets.
+
+## Common Operations
+
+### Get market data (no auth)
+
+```bash
+kraken ticker BTCUSD -o json
+kraken orderbook BTCUSD --count 10 -o json
+kraken ohlc BTCUSD --interval 60 -o json
+kraken trades BTCUSD --count 20 -o json
+```
+
+### Check account (auth required)
+
+```bash
+kraken balance -o json
+kraken open-orders -o json
+kraken trades-history -o json
+```
+
+### Place orders (auth required, dangerous)
+
+```bash
+# Validate first
+kraken order buy BTCUSD 0.001 --type limit --price 50000 --validate -o json
+
+# Then execute (requires user confirmation)
+kraken order buy BTCUSD 0.001 --type limit --price 50000 -o json
+```
+
+### Paper trading (no auth, safe)
+
+```bash
+kraken paper init --balance 10000 -o json
+kraken paper buy BTCUSD 0.01 -o json
+kraken paper status -o json
+kraken paper reset -o json
+```
+
+### Error handling
+
+```bash
+RESULT=$(kraken balance -o json 2>/dev/null)
+if [ $? -ne 0 ]; then
+  CATEGORY=$(echo "$RESULT" | jq -r '.error // "unknown"')
+  # Route on category: auth, rate_limit, network, api, validation, etc.
+fi
+```
+
+## Tool Discovery
+
+Load `agents/tool-catalog.json` for the full machine-readable command contract. Each entry includes parameters, types, auth requirements, and a `dangerous` flag.
+
+## Full Documentation
+
+- `AGENTS.md`: Complete agent integration guide
+- `CONTEXT.md`: Runtime-optimized context for tool-using agents
+- `agents/tool-catalog.json`: All 134 commands with parameters
+- `agents/error-catalog.json`: Error categories with retry guidance
