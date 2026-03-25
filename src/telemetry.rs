@@ -164,8 +164,7 @@ fn write_instance_id(path: &Path, value: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, value)?;
-    set_permissions_0600(path)?;
+    atomic_write_restricted(path, value.as_bytes())?;
     Ok(())
 }
 
@@ -248,13 +247,29 @@ fn is_uuid_like(value: &str) -> bool {
 }
 
 #[cfg(unix)]
-fn set_permissions_0600(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+fn atomic_write_restricted(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let dir = path.parent().unwrap_or(path);
+    let tmp_path = dir.join(".instance_id.tmp");
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp_path)?;
+    file.write_all(data)?;
+    file.sync_all()?;
+
+    fs::rename(&tmp_path, path)?;
+    Ok(())
 }
 
 #[cfg(not(unix))]
-fn set_permissions_0600(_path: &Path) -> std::io::Result<()> {
+fn atomic_write_restricted(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    fs::write(path, data)?;
     Ok(())
 }
 
