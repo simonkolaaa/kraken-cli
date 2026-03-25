@@ -147,15 +147,18 @@ pub(crate) fn load() -> Result<KrakenConfig> {
     Ok(cfg)
 }
 
-/// Save configuration to disk with 0600 permissions.
+/// Save configuration to disk atomically with 0600 permissions.
+///
+/// On Unix the file is written to a temporary path with mode 0600 from
+/// creation, then renamed into place. This eliminates the window where
+/// credentials could be read by other local users.
 pub(crate) fn save(cfg: &KrakenConfig) -> Result<()> {
     let dir = config_dir()?;
     fs::create_dir_all(&dir)?;
     let path = dir.join("config.toml");
     let contents = toml::to_string_pretty(cfg)
         .map_err(|e| KrakenError::Config(format!("TOML serialize error: {e}")))?;
-    fs::write(&path, &contents)?;
-    set_permissions_0600(&path)?;
+    atomic_write_restricted(&path, contents.as_bytes())?;
     Ok(())
 }
 
@@ -352,15 +355,31 @@ pub(crate) fn mask_string(s: &str) -> String {
 }
 
 #[cfg(unix)]
-fn set_permissions_0600(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let perms = fs::Permissions::from_mode(0o600);
-    fs::set_permissions(path, perms)?;
+fn atomic_write_restricted(path: &Path, data: &[u8]) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let dir = path
+        .parent()
+        .ok_or_else(|| KrakenError::Config("config path has no parent directory".into()))?;
+    let tmp_path = dir.join(".config.tmp");
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp_path)?;
+    file.write_all(data)?;
+    file.sync_all()?;
+
+    fs::rename(&tmp_path, path)?;
     Ok(())
 }
 
 #[cfg(not(unix))]
-fn set_permissions_0600(_path: &Path) -> Result<()> {
+fn atomic_write_restricted(path: &Path, data: &[u8]) -> Result<()> {
+    fs::write(path, data)?;
     Ok(())
 }
 
