@@ -5,11 +5,33 @@ use clap::Parser;
 
 use kraken_cli::errors::KrakenError;
 use kraken_cli::output::OutputFormat;
-use kraken_cli::{client, AppContext, Cli};
+use kraken_cli::{client, AppContext, Cli, Command};
 
 #[tokio::main]
 async fn main() {
+    // Load .env variables if present
+    dotenvy::dotenv().ok();
+
     let cli = Cli::parse();
+
+    // Configure logger
+    let mut _log_guard = None;
+    if let Some(Command::Bot { .. }) = &cli.command {
+        if let Some(mut config_dir) = dirs::config_dir() {
+            config_dir.push("kraken");
+            config_dir.push("logs");
+            std::fs::create_dir_all(&config_dir).unwrap_or_default();
+            
+            let file_appender = tracing_appender::rolling::never(&config_dir, "bot_execution.json");
+            let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+            _log_guard = Some(guard);
+            
+            tracing_subscriber::fmt()
+                .json()
+                .with_writer(non_blocking)
+                .init();
+        }
+    }
 
     let format = cli.output.unwrap_or(OutputFormat::Table);
 

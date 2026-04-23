@@ -37,6 +37,11 @@ rustyline = "17"
 colored = "3"
 indicatif = "0.18"
 rmcp = { version = "1.1", default-features = false, features = ["server", "transport-io"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-appender = "0.2"
+rss = "2.0"
+dotenvy = "0.15"
 
 [dev-dependencies]
 wiremock = "0.6"

@@ -8,6 +8,8 @@ pub(crate) mod auth;
 pub mod client;
 pub(crate) mod commands;
 pub mod config;
+pub mod bot;
+
 pub mod errors;
 pub(crate) mod futures_paper;
 pub(crate) mod mcp;
@@ -539,7 +541,26 @@ pub enum Command {
         #[command(subcommand)]
         cmd: WsCommand,
     },
+    /// Autonomous trading bot daemon.
+    Bot {
+        #[command(subcommand)]
+        cmd: BotCommand,
+    },
 }
+
+#[derive(Debug, Subcommand)]
+pub enum BotCommand {
+    /// Start the bot in background
+    Start {
+        /// Watchlist of trading pairs separated by comma (e.g. BTC/USD,SOL/USD,XAU/USD)
+        #[arg(long, default_value = "BTC/USD,SOL/USD,XAU/USD", value_delimiter = ',')]
+        watchlist: Vec<String>,
+        /// Loop interval in minutes
+        #[arg(long, default_value = "15")]
+        interval: u64,
+    },
+}
+
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum DepositSubcommand {
@@ -672,6 +693,20 @@ pub(crate) enum WithdrawalSubcommand {
 /// and MCP tool execution.
 pub(crate) async fn execute_command(ctx: &AppContext, command: Command) -> Result<CommandOutput> {
     match command {
+        // === Bot Command ===
+        Command::Bot { cmd } => {
+            match cmd {
+                BotCommand::Start { watchlist, interval } => {
+                    let client = client::SpotClient::new(ctx.api_url.as_deref())?;
+                    Box::pin(crate::bot::run_bot_loop(&client, watchlist, interval)).await?;
+                    Ok(CommandOutput::new(
+                        serde_json::json!({"status": "stopped"}),
+                        vec!["Status".into()],
+                        vec![vec!["Bot loop exited".into()]]
+                    ))
+                }
+            }
+        }
         // === Public market commands ===
         Command::Status => {
             let client = build_spot_client(ctx)?;
