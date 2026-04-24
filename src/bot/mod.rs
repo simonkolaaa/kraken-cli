@@ -4,8 +4,9 @@ pub mod news;
 pub mod llm;
 pub mod dashboard;
 pub mod telegram;
+pub mod screener;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time;
 use tracing::{error, info, warn};
 
@@ -52,8 +53,34 @@ pub async fn run_bot_loop(
 
     let mut ticker = time::interval(Duration::from_secs(interval_minutes * 60));
 
+    // Inizializza con la watchlist di fallback
+    let mut current_base_assets: Vec<String> = watchlist.iter().map(|s| get_base_asset(s).to_string()).collect();
+    // Imposta il timer in modo che scatti subito al primo ciclo
+    let mut last_screener_update = Instant::now() - Duration::from_secs(6 * 3600);
+
     loop {
         ticker.tick().await;
+
+        // Aggiornamento dinamico della watchlist ogni 6 ore
+        if last_screener_update.elapsed() >= Duration::from_secs(6 * 3600) {
+            match screener::get_hot_assets(3).await {
+                Ok(hot_assets) => {
+                    if hot_assets != current_base_assets {
+                        let msg = format!("🔄 <b>Watchlist dinamica aggiornata:</b> Sto puntando i radar su {:?}", hot_assets);
+                        if let Some(tg) = &telegram {
+                            tg.send_message(&msg).await;
+                        }
+                        current_base_assets = hot_assets;
+                    }
+                    last_screener_update = Instant::now();
+                }
+                Err(e) => {
+                    error!("Screener API failed: {}. Keeping current watchlist as fallback.", e);
+                    // Riprova tra 1 ora in caso di errore
+                    last_screener_update = Instant::now() - Duration::from_secs(5 * 3600);
+                }
+            }
+        }
 
         info!("--- Bot Loop Iteration ---");
 
@@ -76,9 +103,10 @@ pub async fn run_bot_loop(
             }
         };
 
-        // 2. Iterate over watchlist
-        for pair in &watchlist {
-            info!("Evaluating asset: {}", pair);
+        // 2. Iterate over dynamic watchlist
+        for base_asset in &current_base_assets {
+            let pair = format!("{}USD", base_asset);
+            info!("Evaluating asset: {} (Pair: {})", base_asset, pair);
             
             let params = vec![("pair", pair.as_str()), ("interval", "1")];
             let ohlc_data = match client.public_get("OHLC", &params, false).await {
@@ -99,15 +127,13 @@ pub async fn run_bot_loop(
                 }
             };
 
-            let latest_close = extract_latest_close(&ohlc_data, pair).unwrap_or(0.0);
+            let latest_close = extract_latest_close(&ohlc_data, &pair).unwrap_or(0.0);
             if latest_close == 0.0 {
                 warn!("Could not extract latest price for {}. Skipping.", pair);
                 continue;
             }
 
-            let quote_asset = get_quote_asset(pair);
-            let base_asset = get_base_asset(pair);
-            let usd_balance = state.get_balance(quote_asset).await;
+            let usd_balance = state.get_balance("USD").await;
             let asset_balance = state.get_balance(base_asset).await;
 
             let pair_context = MarketContext {
@@ -117,17 +143,17 @@ pub async fn run_bot_loop(
                 asset_balance,
             };
 
-            let signal = strategy.evaluate(&pair_context, pair).await;
+            let signal = strategy.evaluate(&pair_context, &pair).await;
 
             match signal {
                 Signal::Buy => {
-                    let balance = state.get_balance(quote_asset).await;
+                    let balance = state.get_balance("USD").await;
                     if balance > 0.0 {
                         // Allocate 20% of quote asset for multi-asset strategy
                         let amount_to_spend = balance * 0.2; 
                         let volume = amount_to_spend / latest_close;
                         
-                        if let Err(e) = state.execute_trade(OrderSide::Buy, pair, volume, latest_close).await {
+                        if let Err(e) = state.execute_trade(OrderSide::Buy, &pair, volume, latest_close).await {
                             warn!("Could not execute BUY: {}", e);
                         } else {
                             if let Some(tg) = &telegram {
@@ -135,13 +161,13 @@ pub async fn run_bot_loop(
                             }
                         }
                     } else {
-                        warn!("Insufficient {} balance to BUY {}", quote_asset, pair);
+                        warn!("Insufficient USD balance to BUY {}", pair);
                     }
                 }
                 Signal::Sell => {
                     let volume = state.get_balance(base_asset).await;
                     if volume > 0.0 {
-                        if let Err(e) = state.execute_trade(OrderSide::Sell, pair, volume, latest_close).await {
+                        if let Err(e) = state.execute_trade(OrderSide::Sell, &pair, volume, latest_close).await {
                             warn!("Could not execute SELL: {}", e);
                         } else {
                             if let Some(tg) = &telegram {
@@ -157,7 +183,7 @@ pub async fn run_bot_loop(
                 }
             }
 
-            state.print_portfolio_summary(latest_close, pair).await;
+            state.print_portfolio_summary(latest_close, &pair).await;
         }
     }
 
