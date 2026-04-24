@@ -12,6 +12,8 @@ pub enum Signal {
 pub struct MarketContext<'a> {
     pub ohlc_data: Option<&'a Value>,
     pub news: &'a [String],
+    pub usd_balance: f64,
+    pub asset_balance: f64,
 }
 
 pub trait TradingStrategy {
@@ -40,7 +42,7 @@ impl TradingStrategy for LlmSentimentStrategy {
             return Signal::Hold;
         }
 
-        match self.llm_client.analyze_sentiment(pair, context.news).await {
+        match self.llm_client.analyze_sentiment(pair, context.news, context.usd_balance, context.asset_balance).await {
             Ok(decision) => {
                 info!("LLM Decision for {}: {} (Confidence: {}%)", pair, decision.decision, decision.confidence);
                 if decision.confidence < self.confidence_threshold {

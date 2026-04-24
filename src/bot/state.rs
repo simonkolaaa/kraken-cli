@@ -1,11 +1,14 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{error, info};
 
 use crate::errors::Result;
 use crate::paper::{self, OrderSide, PaperState};
 
+#[derive(Clone)]
 pub(crate) struct BotState {
-    pub(crate) paper_state: PaperState,
+    pub(crate) paper_state: Arc<RwLock<PaperState>>,
 }
 
 impl BotState {
@@ -20,15 +23,18 @@ impl BotState {
             }
         };
 
-        Ok(Self { paper_state })
+        Ok(Self {
+            paper_state: Arc::new(RwLock::new(paper_state)),
+        })
     }
 
-    pub(crate) fn get_balance(&self, asset: &str) -> f64 {
-        self.paper_state.available_balance(asset)
+    pub(crate) async fn get_balance(&self, asset: &str) -> f64 {
+        let state = self.paper_state.read().await;
+        state.available_balance(asset)
     }
 
-    pub(crate) fn execute_trade(
-        &mut self,
+    pub(crate) async fn execute_trade(
+        &self,
         side: OrderSide,
         pair: &str,
         volume: f64,
@@ -36,10 +42,11 @@ impl BotState {
     ) -> Result<()> {
         info!("Executing paper trade: {:?} {} {} @ {}", side, volume, pair, price);
 
-        match self.paper_state.place_market_order(side, pair, volume, price, price) {
+        let mut state = self.paper_state.write().await;
+        match state.place_market_order(side, pair, volume, price, price) {
             Ok(trade) => {
                 info!("Trade filled successfully: {:?}", trade);
-                paper::save_state(&self.paper_state)?;
+                paper::save_state(&*state)?;
             }
             Err(e) => {
                 error!("Failed to execute trade: {}", e);
@@ -50,12 +57,13 @@ impl BotState {
         Ok(())
     }
 
-    pub(crate) fn print_portfolio_summary(&self, current_price: f64, pair: &str) {
+    pub(crate) async fn print_portfolio_summary(&self, current_price: f64, pair: &str) {
+        let state = self.paper_state.read().await;
         let mut prices = HashMap::new();
         let pair_no_slash = pair.replace("/", "");
         prices.insert(pair_no_slash, (current_price, current_price));
         
-        let (total_value, _) = self.paper_state.compute_portfolio_value(&prices);
+        let (total_value, _) = state.compute_portfolio_value(&prices);
         info!("Current Portfolio Value: {:.2} USD", total_value);
     }
 }

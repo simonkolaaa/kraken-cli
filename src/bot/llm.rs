@@ -52,7 +52,7 @@ impl GeminiClient {
         Ok(Self { client, api_key })
     }
 
-    pub async fn analyze_sentiment(&self, asset: &str, news: &[String]) -> Result<LlmDecision> {
+    pub async fn analyze_sentiment(&self, asset: &str, news: &[String], usd_balance: f64, asset_balance: f64) -> Result<LlmDecision> {
         if self.api_key.is_empty() {
             info!("GEMINI_API_KEY not set. Using mock LLM response.");
             return Ok(LlmDecision {
@@ -63,8 +63,8 @@ impl GeminiClient {
 
         let news_text = news.join("\n- ");
         let prompt = format!(
-            "Sei un analista finanziario. Leggi queste news recenti:\n- {}\nC'è un sentiment rialzista o ribassista per l'asset {}? Rispondi ESCLUSIVAMENTE con un JSON: {{ \"decision\": \"BUY\" | \"SELL\" | \"HOLD\", \"confidence\": 1-100 }}.",
-            news_text, asset
+            "Sei un analista finanziario. Tu hai {:.2} USD e {:.4} {}. Leggi queste news recenti:\n- {}\nC'è panico o euforia? Se hai zero {} e c'è euforia: BUY. Se hai molti {} e c'è panico: SELL. Altrimenti HOLD.\nRispondi ESCLUSIVAMENTE con un JSON: {{ \"decision\": \"BUY\" | \"SELL\" | \"HOLD\", \"confidence\": 1-100 }}.",
+            usd_balance, asset_balance, asset, news_text, asset, asset
         );
 
         let url = format!("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={}", self.api_key);

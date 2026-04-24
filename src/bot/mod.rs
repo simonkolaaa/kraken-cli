@@ -2,6 +2,8 @@ pub mod state;
 pub mod strategy;
 pub mod news;
 pub mod llm;
+pub mod dashboard;
+pub mod telegram;
 
 use std::time::Duration;
 use tokio::time;
@@ -13,6 +15,7 @@ use state::BotState;
 use strategy::{MarketContext, LlmSentimentStrategy, Signal, TradingStrategy};
 use llm::GeminiClient;
 use news::NewsFetcher;
+use telegram::TelegramNotifier;
 
 const MAX_CONSECUTIVE_ERRORS: u32 = 3;
 
@@ -26,7 +29,21 @@ pub async fn run_bot_loop(
         watchlist, interval_minutes
     );
 
-    let mut state = BotState::new()?;
+    let state = BotState::new()?;
+    let dashboard_state = state.paper_state.clone();
+    
+    // Spawn dashboard
+    tokio::spawn(async move {
+        dashboard::start_dashboard(dashboard_state).await;
+    });
+
+    let telegram = TelegramNotifier::new();
+
+    let start_msg = format!("🤖 <b>Bot avviato con successo.</b>\nWatchlist: {:?}\nSaldo iniziale: {:.2} USD", watchlist, state.get_balance("USD").await);
+    if let Some(tg) = &telegram {
+        tg.send_message(&start_msg).await;
+    }
+
     let mut consecutive_errors = 0;
 
     let llm_client = GeminiClient::new()?;
@@ -50,6 +67,8 @@ pub async fn run_bot_loop(
                 warn!("Failed to fetch news: {}. Will use fallback.", e);
                 consecutive_errors += 1;
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    let kill_msg = "🚨 <b>ATTENZIONE: Kill Switch Attivato!</b> Bot fermato a causa di errori continui sulle news.";
+                    if let Some(tg) = &telegram { tg.send_message(kill_msg).await; }
                     error!("FATAL: Reached {} consecutive errors. Kill Switch activated.", MAX_CONSECUTIVE_ERRORS);
                     break;
                 }
@@ -71,6 +90,8 @@ pub async fn run_bot_loop(
                     error!("Failed to fetch OHLC data for {}: {}", pair, e);
                     consecutive_errors += 1;
                     if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                        let kill_msg = "🚨 <b>ATTENZIONE: Kill Switch Attivato!</b> Bot fermato a causa di errori continui su OHLC.";
+                        if let Some(tg) = &telegram { tg.send_message(kill_msg).await; }
                         error!("FATAL: Reached {} consecutive errors. Kill Switch activated.", MAX_CONSECUTIVE_ERRORS);
                         return Ok(());
                     }
@@ -84,35 +105,48 @@ pub async fn run_bot_loop(
                 continue;
             }
 
+            let quote_asset = get_quote_asset(pair);
+            let base_asset = get_base_asset(pair);
+            let usd_balance = state.get_balance(quote_asset).await;
+            let asset_balance = state.get_balance(base_asset).await;
+
             let pair_context = MarketContext {
                 ohlc_data: Some(&ohlc_data),
                 news: &general_news,
+                usd_balance,
+                asset_balance,
             };
 
             let signal = strategy.evaluate(&pair_context, pair).await;
 
             match signal {
                 Signal::Buy => {
-                    let quote_asset = get_quote_asset(pair);
-                    let balance = state.get_balance(quote_asset);
+                    let balance = state.get_balance(quote_asset).await;
                     if balance > 0.0 {
                         // Allocate 20% of quote asset for multi-asset strategy
                         let amount_to_spend = balance * 0.2; 
                         let volume = amount_to_spend / latest_close;
                         
-                        if let Err(e) = state.execute_trade(OrderSide::Buy, pair, volume, latest_close) {
+                        if let Err(e) = state.execute_trade(OrderSide::Buy, pair, volume, latest_close).await {
                             warn!("Could not execute BUY: {}", e);
+                        } else {
+                            if let Some(tg) = &telegram {
+                                tg.send_message(&format!("✅ <b>Eseguito BUY</b> di {:.4} {} a {:.2}$!", volume, pair, latest_close)).await;
+                            }
                         }
                     } else {
                         warn!("Insufficient {} balance to BUY {}", quote_asset, pair);
                     }
                 }
                 Signal::Sell => {
-                    let base_asset = get_base_asset(pair);
-                    let volume = state.get_balance(base_asset);
+                    let volume = state.get_balance(base_asset).await;
                     if volume > 0.0 {
-                        if let Err(e) = state.execute_trade(OrderSide::Sell, pair, volume, latest_close) {
+                        if let Err(e) = state.execute_trade(OrderSide::Sell, pair, volume, latest_close).await {
                             warn!("Could not execute SELL: {}", e);
+                        } else {
+                            if let Some(tg) = &telegram {
+                                tg.send_message(&format!("✅ <b>Eseguito SELL</b> di {:.4} {} a {:.2}$!", volume, pair, latest_close)).await;
+                            }
                         }
                     } else {
                         warn!("Insufficient {} balance to SELL {}", base_asset, pair);
@@ -123,7 +157,7 @@ pub async fn run_bot_loop(
                 }
             }
 
-            state.print_portfolio_summary(latest_close, pair);
+            state.print_portfolio_summary(latest_close, pair).await;
         }
     }
 
