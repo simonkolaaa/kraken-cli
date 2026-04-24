@@ -1,4 +1,4 @@
-use crate::bot::llm::GeminiClient;
+use crate::bot::llm::OpenRouterClient;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
@@ -22,12 +22,12 @@ pub trait TradingStrategy {
 }
 
 pub struct LlmSentimentStrategy {
-    llm_client: GeminiClient,
+    llm_client: OpenRouterClient,
     confidence_threshold: u8,
 }
 
 impl LlmSentimentStrategy {
-    pub fn new(llm_client: GeminiClient, confidence_threshold: u8) -> Self {
+    pub fn new(llm_client: OpenRouterClient, confidence_threshold: u8) -> Self {
         Self {
             llm_client,
             confidence_threshold,

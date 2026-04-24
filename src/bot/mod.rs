@@ -13,7 +13,7 @@ use crate::client::SpotClient;
 use crate::paper::OrderSide;
 use state::BotState;
 use strategy::{MarketContext, LlmSentimentStrategy, Signal, TradingStrategy};
-use llm::GeminiClient;
+use llm::OpenRouterClient;
 use news::NewsFetcher;
 use telegram::TelegramNotifier;
 
@@ -46,7 +46,7 @@ pub async fn run_bot_loop(
 
     let mut consecutive_errors = 0;
 
-    let llm_client = GeminiClient::new()?;
+    let llm_client = OpenRouterClient::new()?;
     let news_fetcher = NewsFetcher::new()?;
     let mut strategy = LlmSentimentStrategy::new(llm_client, 60);
 
