@@ -57,4 +57,4 @@ Il bot è strutturato per essere eseguito come demone su server Linux (es. AWS E
    Puoi disconnetterti da tmux premendo `Ctrl+B` seguito da `D`. Per ricollegarti: `tmux attach -t krakenbot`.
 
 ---
-*Disclaimer: Il software è fornito a scopo didattico e sperimentale.*
+
