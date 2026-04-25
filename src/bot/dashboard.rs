@@ -167,8 +167,6 @@ async fn serve_html() -> Html<&'static str> {
             }
         }
 
-        }
-
         async function initChart() {
             const chartOptions = { 
                 layout: { textColor: '#d1d5db', background: { type: 'solid', color: '#161b22' } },
