@@ -54,34 +54,16 @@ pub async fn run_bot_loop(
 
     let mut ticker = time::interval(Duration::from_secs(interval_minutes * 60));
 
-    // Inizializza con la watchlist di fallback
-    let mut current_base_assets: Vec<String> = watchlist.iter().map(|s| get_base_asset(s).to_string()).collect();
-    // Imposta il timer in modo che scatti subito al primo ciclo
-    let mut last_screener_update = Instant::now() - Duration::from_secs(6 * 3600);
-
     loop {
         ticker.tick().await;
 
-        // Aggiornamento dinamico della watchlist ogni 6 ore
-        if last_screener_update.elapsed() >= Duration::from_secs(6 * 3600) {
-            match screener::get_hot_assets(10).await {
-                Ok(hot_assets) => {
-                    if hot_assets != current_base_assets {
-                        let msg = format!("🔄 <b>Watchlist dinamica aggiornata:</b> Sto puntando i radar su {:?}", hot_assets);
-                        if let Some(tg) = &telegram {
-                            tg.send_message(&msg).await;
-                        }
-                        current_base_assets = hot_assets;
-                    }
-                    last_screener_update = Instant::now();
-                }
-                Err(e) => {
-                    error!("Screener API failed: {}. Keeping current watchlist as fallback.", e);
-                    // Riprova tra 1 ora in caso di errore
-                    last_screener_update = Instant::now() - Duration::from_secs(5 * 3600);
-                }
+        let current_base_assets = match screener::get_global_usd_assets(50).await {
+            Ok(assets) => assets,
+            Err(e) => {
+                error!("Screener API failed: {}. Retrying next cycle.", e);
+                continue;
             }
-        }
+        };
 
         info!("--- Bot Loop Iteration ---");
 
@@ -105,9 +87,15 @@ pub async fn run_bot_loop(
         };
 
         // 2. Iterate over dynamic watchlist
+        let mut evaluated_count = 0;
         for base_asset in &current_base_assets {
+            if evaluated_count >= 10 {
+                info!("Reached maximum evaluated candidates for this cycle (10).");
+                break;
+            }
+
             let pair = format!("{}USD", base_asset);
-            info!("Evaluating asset: {} (Pair: {})", base_asset, pair);
+            info!("Evaluating technicals for asset: {} (Pair: {})", base_asset, pair);
             
             let params = vec![("pair", pair.as_str()), ("interval", "15")];
             let ohlc_data = match client.public_get("OHLC", &params, false).await {
@@ -145,6 +133,25 @@ pub async fn run_bot_loop(
                 state.update_indicators(current_rsi, current_sma).await;
             }
 
+            // Validation Logic based on RSI before AI
+            if let Some(rsi) = current_rsi {
+                if rsi > 70.0 || rsi < 30.0 {
+                    info!("RSI for {} is {:.2} (extreme). Skipping AI analysis.", pair, rsi);
+                    continue;
+                }
+            } else {
+                warn!("Could not calculate RSI for {}. Skipping.", pair);
+                continue;
+            }
+
+            // Strong Candidate found!
+            evaluated_count += 1;
+            let rsi_val = current_rsi.unwrap();
+            let msg = format!("🎯 <b>Nuovo Candidato Forte:</b> {} (RSI: {:.2}).\n<i>Analizzo le News e valuto con LLM...</i>", pair, rsi_val);
+            if let Some(tg) = &telegram {
+                tg.send_message(&msg).await;
+            }
+
             let usd_balance = state.get_balance("USD").await;
             let asset_balance = state.get_balance(base_asset).await;
 
@@ -155,22 +162,7 @@ pub async fn run_bot_loop(
                 asset_balance,
             };
 
-            let mut signal = strategy.evaluate(&pair_context, &pair).await;
-            
-            // Validation Logic based on RSI
-            if let Some(rsi) = current_rsi {
-                match signal {
-                    Signal::Buy if rsi > 70.0 => {
-                        info!("AI suggested BUY for {}, but RSI is {:.2} (>70, overbought). Changing signal to HOLD.", pair, rsi);
-                        signal = Signal::Hold;
-                    }
-                    Signal::Sell if rsi < 30.0 => {
-                        info!("AI suggested SELL for {}, but RSI is {:.2} (<30, oversold). Changing signal to HOLD.", pair, rsi);
-                        signal = Signal::Hold;
-                    }
-                    _ => {}
-                }
-            }
+            let signal = strategy.evaluate(&pair_context, &pair).await;
 
             match signal {
                 Signal::Buy => {
