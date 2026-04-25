@@ -5,6 +5,7 @@ pub mod llm;
 pub mod dashboard;
 pub mod telegram;
 pub mod screener;
+pub mod indicators;
 
 use std::time::{Duration, Instant};
 use tokio::time;
@@ -49,7 +50,7 @@ pub async fn run_bot_loop(
 
     let llm_client = OpenRouterClient::new()?;
     let news_fetcher = NewsFetcher::new()?;
-    let mut strategy = LlmSentimentStrategy::new(llm_client, 60);
+    let mut strategy = LlmSentimentStrategy::new(llm_client, 55);
 
     let mut ticker = time::interval(Duration::from_secs(interval_minutes * 60));
 
@@ -63,7 +64,7 @@ pub async fn run_bot_loop(
 
         // Aggiornamento dinamico della watchlist ogni 6 ore
         if last_screener_update.elapsed() >= Duration::from_secs(6 * 3600) {
-            match screener::get_hot_assets(3).await {
+            match screener::get_hot_assets(10).await {
                 Ok(hot_assets) => {
                     if hot_assets != current_base_assets {
                         let msg = format!("🔄 <b>Watchlist dinamica aggiornata:</b> Sto puntando i radar su {:?}", hot_assets);
@@ -108,7 +109,7 @@ pub async fn run_bot_loop(
             let pair = format!("{}USD", base_asset);
             info!("Evaluating asset: {} (Pair: {})", base_asset, pair);
             
-            let params = vec![("pair", pair.as_str()), ("interval", "1")];
+            let params = vec![("pair", pair.as_str()), ("interval", "15")];
             let ohlc_data = match client.public_get("OHLC", &params, false).await {
                 Ok(data) => {
                     consecutive_errors = 0;
@@ -127,10 +128,21 @@ pub async fn run_bot_loop(
                 }
             };
 
-            let latest_close = extract_latest_close(&ohlc_data, &pair).unwrap_or(0.0);
+            let closes = extract_closes(&ohlc_data, &pair);
+            let latest_close = closes.last().copied().unwrap_or(0.0);
             if latest_close == 0.0 {
                 warn!("Could not extract latest price for {}. Skipping.", pair);
                 continue;
+            }
+
+            let mut current_rsi = None;
+            let mut current_sma = None;
+
+            if closes.len() >= 50 {
+                let latest_50_closes = &closes[closes.len() - 50..];
+                current_rsi = indicators::calculate_rsi(latest_50_closes, 14);
+                current_sma = indicators::calculate_sma(latest_50_closes, 20);
+                state.update_indicators(current_rsi, current_sma).await;
             }
 
             let usd_balance = state.get_balance("USD").await;
@@ -143,7 +155,22 @@ pub async fn run_bot_loop(
                 asset_balance,
             };
 
-            let signal = strategy.evaluate(&pair_context, &pair).await;
+            let mut signal = strategy.evaluate(&pair_context, &pair).await;
+            
+            // Validation Logic based on RSI
+            if let Some(rsi) = current_rsi {
+                match signal {
+                    Signal::Buy if rsi > 70.0 => {
+                        info!("AI suggested BUY for {}, but RSI is {:.2} (>70, overbought). Changing signal to HOLD.", pair, rsi);
+                        signal = Signal::Hold;
+                    }
+                    Signal::Sell if rsi < 30.0 => {
+                        info!("AI suggested SELL for {}, but RSI is {:.2} (<30, oversold). Changing signal to HOLD.", pair, rsi);
+                        signal = Signal::Hold;
+                    }
+                    _ => {}
+                }
+            }
 
             match signal {
                 Signal::Buy => {
@@ -190,7 +217,8 @@ pub async fn run_bot_loop(
     Ok(())
 }
 
-fn extract_latest_close(ohlc_data: &serde_json::Value, pair: &str) -> Option<f64> {
+fn extract_closes(ohlc_data: &serde_json::Value, pair: &str) -> Vec<f64> {
+    let mut closes = Vec::new();
     let candles = ohlc_data.get(pair).or_else(|| {
         ohlc_data
             .as_object()
@@ -198,15 +226,19 @@ fn extract_latest_close(ohlc_data: &serde_json::Value, pair: &str) -> Option<f64
     });
 
     if let Some(serde_json::Value::Array(arr)) = candles {
-        if let Some(serde_json::Value::Array(last_candle)) = arr.last() {
-            if let Some(close_str) = last_candle.get(4).and_then(|v| v.as_str()) {
-                return close_str.parse::<f64>().ok();
-            } else if let Some(close_num) = last_candle.get(4).and_then(|v| v.as_f64()) {
-                return Some(close_num);
+        for candle in arr {
+            if let serde_json::Value::Array(c) = candle {
+                if let Some(close_str) = c.get(4).and_then(|v| v.as_str()) {
+                    if let Ok(val) = close_str.parse::<f64>() {
+                        closes.push(val);
+                    }
+                } else if let Some(close_num) = c.get(4).and_then(|v| v.as_f64()) {
+                    closes.push(close_num);
+                }
             }
         }
     }
-    None
+    closes
 }
 
 fn get_quote_asset(pair: &str) -> &str {

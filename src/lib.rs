@@ -556,7 +556,7 @@ pub enum BotCommand {
         #[arg(long, default_value = "BTC/USD,SOL/USD,XAU/USD", value_delimiter = ',')]
         watchlist: Vec<String>,
         /// Loop interval in minutes
-        #[arg(long, default_value = "15")]
+        #[arg(long, default_value = "2")]
         interval: u64,
     },
 }

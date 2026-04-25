@@ -57,13 +57,40 @@ async fn serve_html() -> Html<&'static str> {
         th { background-color: #21262d; }
         .buy { color: #56d364; }
         .sell { color: #f85149; }
+        #chart-container {
+            width: 100%;
+            height: 400px;
+            margin-top: 10px;
+        }
+        .indicators {
+            display: flex;
+            gap: 20px;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #21262d;
+            border-radius: 6px;
+        }
+        .indicator-box {
+            font-size: 16px;
+        }
+        .rsi-high { color: #f85149; }
+        .rsi-low { color: #56d364; }
     </style>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
     <h1>🤖 Bot Dashboard (Live)</h1>
     <div class="card">
-        <h2>Balances</h2>
+        <h2>Balances & Indicators</h2>
         <div id="balances">Loading...</div>
+        <div class="indicators" id="indicators-container">
+            <div class="indicator-box"><strong>RSI (14):</strong> <span id="val-rsi">-</span></div>
+            <div class="indicator-box"><strong>SMA (20):</strong> <span id="val-sma">-</span></div>
+        </div>
+    </div>
+    <div class="card">
+        <h2>Market Chart (BTC/USD)</h2>
+        <div id="chart-container"></div>
     </div>
     <div class="card">
         <h2>Recent Trades</h2>
@@ -98,6 +125,23 @@ async fn serve_html() -> Html<&'static str> {
                 balHtml += '</ul>';
                 document.getElementById('balances').innerHTML = balHtml;
 
+                // Render Indicators
+                const rsiSpan = document.getElementById('val-rsi');
+                if (data.current_rsi !== null && data.current_rsi !== undefined) {
+                    let rsiVal = data.current_rsi.toFixed(2);
+                    rsiSpan.innerText = rsiVal;
+                    rsiSpan.className = data.current_rsi > 70 ? 'rsi-high' : (data.current_rsi < 30 ? 'rsi-low' : '');
+                } else {
+                    rsiSpan.innerText = '-';
+                    rsiSpan.className = '';
+                }
+
+                if (data.current_sma !== null && data.current_sma !== undefined) {
+                    document.getElementById('val-sma').innerText = data.current_sma.toFixed(2);
+                } else {
+                    document.getElementById('val-sma').innerText = '-';
+                }
+
                 // Render Trades
                 const tbody = document.getElementById('trades-body');
                 tbody.innerHTML = '';
@@ -123,6 +167,54 @@ async fn serve_html() -> Html<&'static str> {
             }
         }
 
+        }
+
+        async function initChart() {
+            const chartOptions = { 
+                layout: { textColor: '#d1d5db', background: { type: 'solid', color: '#161b22' } },
+                grid: {
+                    vertLines: { color: '#30363d' },
+                    horzLines: { color: '#30363d' },
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                },
+                rightPriceScale: {
+                    borderColor: '#30363d',
+                },
+                timeScale: {
+                    borderColor: '#30363d',
+                    timeVisible: true,
+                },
+            };
+            const chart = LightweightCharts.createChart(document.getElementById('chart-container'), chartOptions);
+            const candlestickSeries = chart.addCandlestickSeries({
+                upColor: '#56d364', downColor: '#f85149', borderVisible: false,
+                wickUpColor: '#56d364', wickDownColor: '#f85149'
+            });
+
+            try {
+                // Fetch OHLC from Kraken directly for BTC/USD as reference
+                const res = await fetch('https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=15');
+                const data = await res.json();
+                const pairKey = Object.keys(data.result).find(k => k !== 'last');
+                const candles = data.result[pairKey];
+                
+                const cdata = candles.map(c => ({
+                    time: parseInt(c[0]),
+                    open: parseFloat(c[1]),
+                    high: parseFloat(c[2]),
+                    low: parseFloat(c[3]),
+                    close: parseFloat(c[4])
+                }));
+                
+                candlestickSeries.setData(cdata);
+            } catch (err) {
+                console.error("Failed to fetch chart data", err);
+            }
+        }
+
+        initChart();
         setInterval(fetchState, 5000);
         fetchState();
     </script>

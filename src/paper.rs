@@ -57,6 +57,10 @@ pub(crate) struct PaperState {
     next_order_id: u64,
     #[serde(default)]
     pub(crate) cancelled_orders: Vec<PaperOrder>,
+    #[serde(default)]
+    pub(crate) current_rsi: Option<f64>,
+    #[serde(default)]
+    pub(crate) current_sma: Option<f64>,
 }
 
 fn default_next_order_id() -> u64 {
@@ -173,6 +177,8 @@ impl PaperState {
             updated_at: now,
             next_order_id: 1,
             cancelled_orders: Vec::new(),
+            current_rsi: None,
+            current_sma: None,
         }
     }
 

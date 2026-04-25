@@ -66,4 +66,13 @@ impl BotState {
         let (total_value, _) = state.compute_portfolio_value(&prices);
         info!("Current Portfolio Value: {:.2} USD", total_value);
     }
+
+    pub(crate) async fn update_indicators(&self, rsi: Option<f64>, sma: Option<f64>) {
+        let mut state = self.paper_state.write().await;
+        state.current_rsi = rsi;
+        state.current_sma = sma;
+        if let Err(e) = paper::save_state(&*state) {
+            error!("Failed to save paper state after updating indicators: {}", e);
+        }
+    }
 }
