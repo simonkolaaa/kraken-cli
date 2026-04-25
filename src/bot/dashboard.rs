@@ -207,6 +207,7 @@ async fn serve_html() -> Html<&'static str> {
                 }));
                 
                 candlestickSeries.setData(cdata);
+                chart.timeScale().fitContent();
             } catch (err) {
                 console.error("Failed to fetch chart data", err);
             }

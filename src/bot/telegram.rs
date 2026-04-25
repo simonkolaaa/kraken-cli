@@ -47,4 +47,27 @@ impl TelegramNotifier {
             }
         }
     }
+    pub async fn get_updates(&self, offset: u64) -> Result<(u64, Vec<serde_json::Value>), String> {
+        let url = format!("https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=30", self.token, offset);
+        
+        let resp = self.client.get(&url).send().await.map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("Status {}", resp.status()));
+        }
+        
+        let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        let mut new_offset = offset;
+        let mut updates = Vec::new();
+
+        if let Some(result) = json.get("result").and_then(|r| r.as_array()) {
+            for update in result {
+                if let Some(update_id) = update.get("update_id").and_then(|u| u.as_u64()) {
+                    new_offset = new_offset.max(update_id + 1);
+                    updates.push(update.clone());
+                }
+            }
+        }
+
+        Ok((new_offset, updates))
+    }
 }

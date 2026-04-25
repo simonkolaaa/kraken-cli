@@ -46,6 +46,54 @@ pub async fn run_bot_loop(
         tg.send_message(&start_msg).await;
     }
 
+    if let Some(tg) = telegram.clone() {
+        let tg_state = state.clone();
+        tokio::spawn(async move {
+            let mut offset = 0;
+            loop {
+                if let Ok((new_offset, updates)) = tg.get_updates(offset).await {
+                    offset = new_offset;
+                    for update in updates {
+                        if let Some(msg) = update.get("message") {
+                            if let Some(text) = msg.get("text").and_then(|t| t.as_str()) {
+                                if text.starts_with("/report") {
+                                    let paper = tg_state.paper_state.read().await;
+                                    let mut pos_text = String::new();
+                                    for (asset, amt) in &paper.balances {
+                                        if asset != "USD" && *amt > 0.0 {
+                                            pos_text.push_str(&format!("- <b>{}</b>: {:.4}\n", asset, amt));
+                                        }
+                                    }
+                                    if pos_text.is_empty() {
+                                        pos_text = "Nessuna posizione aperta.".to_string();
+                                    }
+                                    let usd_bal = paper.balances.get("USD").unwrap_or(&0.0);
+                                    let initial = paper.starting_balance;
+                                    let reply = format!(
+                                        "📊 <b>Report P&L</b>\n\n💰 Saldo USD (Cash): {:.2}\n📈 Capitale Iniziale: {:.2}\n📉 Posizioni aperte:\n{}", 
+                                        usd_bal,
+                                        initial,
+                                        pos_text
+                                    );
+                                    tg.send_message(&reply).await;
+                                } else if text.starts_with("/testbuy") {
+                                    let price = 100000.0;
+                                    let volume = 10.0 / price;
+                                    if let Err(e) = tg_state.execute_trade(crate::paper::OrderSide::Buy, "XBTUSD", volume, price).await {
+                                        tg.send_message(&format!("❌ <b>Errore TestBuy</b>: {}", e)).await;
+                                    } else {
+                                        tg.send_message(&format!("✅ <b>TestBuy Eseguito</b>: Acquistati {:.6} XBT a {:.2} USD.", volume, price)).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+            }
+        });
+    }
+
     let mut consecutive_errors = 0;
 
     let llm_client = OpenRouterClient::new()?;
@@ -147,10 +195,7 @@ pub async fn run_bot_loop(
             // Strong Candidate found!
             evaluated_count += 1;
             let rsi_val = current_rsi.unwrap();
-            let msg = format!("🎯 <b>Nuovo Candidato Forte:</b> {} (RSI: {:.2}).\n<i>Analizzo le News e valuto con LLM...</i>", pair, rsi_val);
-            if let Some(tg) = &telegram {
-                tg.send_message(&msg).await;
-            }
+            info!("🎯 Nuovo Candidato Forte: {} (RSI: {:.2}). Analizzo le News e valuto con LLM...", pair, rsi_val);
 
             let usd_balance = state.get_balance("USD").await;
             let asset_balance = state.get_balance(base_asset).await;
