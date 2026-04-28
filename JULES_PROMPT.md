@@ -1,7 +1,8 @@
 <instruction>You are an expert software engineer. You are working on a WIP branch. Please run `git status` and `git diff` to understand the changes and the current state of the code. Analyze the workspace context and complete the mission brief.</instruction>
 <workspace_context>
 </workspace_context>
-<mission_brief>["Il bot non sta ancora eseguendo trade autonomi, risulta troppo conservativo. Dobbiamo allentare drasticamente i filtri per vedere l'operatività reale:
+<mission_brief>[mission_brief]"
+mission_brief>["Il bot non sta ancora eseguendo trade autonomi, risulta troppo conservativo. Dobbiamo allentare drasticamente i filtri per vedere l'operatività reale:
 
 Allarga il Filtro Tecnico: Modifica i limiti dell'RSI. Ora scarta gli asset <30 o >70. Cambialo in modo che accetti asset con RSI tra 50 e 80.
 
