@@ -49,7 +49,7 @@ impl OpenRouterClient {
 
         let news_text = news.join(" | ");
         let prompt = format!(
-            "Sei un analista finanziario. Tu hai {:.2} USD e {:.4} {}. Leggi queste news recenti:\n{}\nC'è panico o euforia? Se hai zero {} e c'è euforia: BUY. Se hai molti {} e c'è panico: SELL. Altrimenti HOLD.\nRispondi ESCLUSIVAMENTE in JSON con 'decision' (BUY, SELL, HOLD) e 'confidence' (1-100).",
+            "Sei un trader aggressivo senza esagerare. Sii propenso al rischio senza esagerare. Se c'è positività tecnica o di news, favorisci un segnale di BUY.\nSei un analista finanziario. Tu hai {:.2} USD e {:.4} {}. Leggi queste news recenti:\n{}\nC'è panico o euforia? Se hai zero {} e c'è euforia (o assenza di notizie negative): BUY. Se hai molti {} e c'è panico: SELL. Altrimenti HOLD.\nRispondi ESCLUSIVAMENTE in JSON con 'decision' (BUY, SELL, HOLD) e 'confidence' (1-100).",
             usd_balance, asset_balance, asset, news_text, asset, asset
         );
 

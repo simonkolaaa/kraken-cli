@@ -37,12 +37,15 @@ impl LlmSentimentStrategy {
 
 impl TradingStrategy for LlmSentimentStrategy {
     async fn evaluate(&mut self, context: &MarketContext<'_>, pair: &str) -> Signal {
-        if context.news.is_empty() {
-            warn!("No news available for LLM evaluation on {}. Defaulting to HOLD.", pair);
-            return Signal::Hold;
-        }
+        let fallback_news = vec!["Nessuna notizia recente. Assenza di notizie negative, valuta positivamente l'assenza di panico e i segnali tecnici.".to_string()];
+        let news_to_use = if context.news.is_empty() {
+            warn!("No news available for LLM evaluation on {}. Using fallback positive context.", pair);
+            &fallback_news
+        } else {
+            context.news
+        };
 
-        match self.llm_client.analyze_sentiment(pair, context.news, context.usd_balance, context.asset_balance).await {
+        match self.llm_client.analyze_sentiment(pair, news_to_use, context.usd_balance, context.asset_balance).await {
             Ok(decision) => {
                 info!("LLM Decision for {}: {} (Confidence: {}%)", pair, decision.decision, decision.confidence);
                 if decision.confidence < self.confidence_threshold {

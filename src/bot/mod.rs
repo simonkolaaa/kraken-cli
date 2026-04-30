@@ -183,8 +183,8 @@ pub async fn run_bot_loop(
 
             // Validation Logic based on RSI before AI
             if let Some(rsi) = current_rsi {
-                if rsi > 70.0 || rsi < 30.0 {
-                    info!("RSI for {} is {:.2} (extreme). Skipping AI analysis.", pair, rsi);
+                if rsi > 80.0 || rsi < 50.0 {
+                    info!("RSI for {} is {:.2} (outside 50-80 range). Skipping AI analysis.", pair, rsi);
                     continue;
                 }
             } else {
