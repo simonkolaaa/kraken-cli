@@ -23,12 +23,11 @@ const MAX_CONSECUTIVE_ERRORS: u32 = 3;
 
 pub async fn run_bot_loop(
     client: &SpotClient,
-    watchlist: Vec<String>,
     interval_minutes: u64,
 ) -> crate::errors::Result<()> {
     info!(
-        "Starting autonomous sentiment bot. Watchlist: {:?}, interval: {}m",
-        watchlist, interval_minutes
+        "Starting autonomous sentiment bot. Dynamic Screener Top 50, interval: {}m",
+        interval_minutes
     );
 
     let state = BotState::new()?;
@@ -41,7 +40,7 @@ pub async fn run_bot_loop(
 
     let telegram = TelegramNotifier::new();
 
-    let start_msg = format!("🤖 <b>Bot avviato con successo.</b>\nWatchlist: {:?}\nSaldo iniziale: {:.2} USD", watchlist, state.get_balance("USD").await);
+    let start_msg = format!("🤖 <b>Bot avviato con successo.</b>\nModalità: Screener Dinamico (Top 50)\nSaldo iniziale: {:.2} USD", state.get_balance("USD").await);
     if let Some(tg) = &telegram {
         tg.send_message(&start_msg).await;
     }
@@ -137,8 +136,8 @@ pub async fn run_bot_loop(
         // 2. Iterate over dynamic watchlist
         let mut evaluated_count = 0;
         for base_asset in &current_base_assets {
-            if evaluated_count >= 10 {
-                info!("Reached maximum evaluated candidates for this cycle (10).");
+            if evaluated_count >= 50 {
+                info!("Reached maximum evaluated candidates for this cycle (50).");
                 break;
             }
 

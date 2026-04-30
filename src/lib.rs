@@ -552,9 +552,6 @@ pub enum Command {
 pub enum BotCommand {
     /// Start the bot in background
     Start {
-        /// Watchlist of trading pairs separated by comma (e.g. BTC/USD,SOL/USD,XAU/USD)
-        #[arg(long, default_value = "BTC/USD,SOL/USD,XAU/USD", value_delimiter = ',')]
-        watchlist: Vec<String>,
         /// Loop interval in minutes
         #[arg(long, default_value = "2")]
         interval: u64,
@@ -696,9 +693,9 @@ pub(crate) async fn execute_command(ctx: &AppContext, command: Command) -> Resul
         // === Bot Command ===
         Command::Bot { cmd } => {
             match cmd {
-                BotCommand::Start { watchlist, interval } => {
+                BotCommand::Start { interval } => {
                     let client = client::SpotClient::new(ctx.api_url.as_deref())?;
-                    Box::pin(crate::bot::run_bot_loop(&client, watchlist, interval)).await?;
+                    Box::pin(crate::bot::run_bot_loop(&client, interval)).await?;
                     Ok(CommandOutput::new(
                         serde_json::json!({"status": "stopped"}),
                         vec!["Status".into()],
